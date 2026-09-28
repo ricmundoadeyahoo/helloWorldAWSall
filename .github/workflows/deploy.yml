@@ -45,6 +45,13 @@ jobs:
       - name: Compilar
         run: dotnet build src/HelloApi/HelloApi.csproj --configuration Release --no-restore
 
+      - name: Debug OIDC token (temporal)
+        run: |
+          IDTOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
+          echo "$IDTOKEN" | cut -d '.' -f2 | base64 -d 2>/dev/null | jq . || echo "$IDTOKEN" | cut -d '.' -f2
+
+
       - name: Configurar credenciales AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
