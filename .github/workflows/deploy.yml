@@ -1,0 +1,77 @@
+name: Deploy Hello World AWS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Ambiente de despliegue"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
+
+env:
+  AWS_REGION: us-east-1
+  STACK_NAME: hello-world-aws-stack
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+  S3_DEPLOY_BUCKET: lambda-sqs-sns-deploy-114019965815 # reutilizamos el bucket ya creado
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restaurar dependencias
+        run: dotnet restore src/HelloApi/HelloApi.csproj
+
+      - name: Compilar
+        run: dotnet build src/HelloApi/HelloApi.csproj --configuration Release --no-restore
+
+      - name: Configurar credenciales AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configurar AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: SAM build
+        run: sam build --template-file template.yaml
+
+      - name: SAM deploy
+        run: |
+          sam deploy \
+            --stack-name "${STACK_NAME}-${ENVIRONMENT}" \
+            --region "${AWS_REGION}" \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --s3-bucket "${S3_DEPLOY_BUCKET}" \
+            --parameter-overrides EnvironmentName="${ENVIRONMENT}"
+
+      - name: Mostrar URL del API
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}-${ENVIRONMENT}" \
+            --region "${AWS_REGION}" \
+            --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' \
+            --output text

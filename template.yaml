@@ -1,0 +1,83 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Fase 1 — App Hello World en AWS: API Gateway + Lambda (C#) + DynamoDB
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Sufijo de ambiente (dev, qa, prod)
+
+Globals:
+  Function:
+    Timeout: 15
+    MemorySize: 256
+    Runtime: dotnet8
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref EnvironmentName
+
+Resources:
+
+  # Tabla DynamoDB: guarda cada visita (visitId como clave de partición)
+  VisitsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "hello-world-visits-${EnvironmentName}"
+      BillingMode: PAY_PER_REQUEST # sin necesidad de aprovisionar capacidad, ideal para una demo
+      AttributeDefinitions:
+        - AttributeName: visitId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: visitId
+          KeyType: HASH
+
+  # Lambda que atiende las peticiones HTTP
+  HelloApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "hello-api-${EnvironmentName}"
+      CodeUri: src/HelloApi/
+      Handler: HelloApi::HelloApi.Function::FunctionHandler
+      Environment:
+        Variables:
+          VISITS_TABLE_NAME: !Ref VisitsTable
+      Policies:
+        # Permite a la Lambda leer/escribir SOLO en esta tabla (mínimo privilegio,
+        # a diferencia de la política amplia que usamos en el proyecto anterior)
+        - DynamoDBCrudPolicy:
+            TableName: !Ref VisitsTable
+      Events:
+        HelloEndpoint:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /hello
+            Method: GET
+
+  # API Gateway HTTP API (más simple y económica que REST API para este caso)
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref EnvironmentName
+      CorsConfiguration:
+        AllowOrigins:
+          - "*" # abierto para la demo; se restringe en la Fase 2 al dominio del frontend
+        AllowMethods:
+          - GET
+        AllowHeaders:
+          - "*"
+
+Outputs:
+  ApiUrl:
+    Description: URL pública del endpoint /hello
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}/hello"
+  FunctionName:
+    Description: Nombre de la función Lambda
+    Value: !Ref HelloApiFunction
+  TableName:
+    Description: Nombre de la tabla DynamoDB
+    Value: !Ref VisitsTable
